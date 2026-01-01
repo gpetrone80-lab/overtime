@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FD Overtime Tracker (Cloud)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .fd-header { background-color: #b91c1c; }
+        /* Loading Spinner */
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #b91c1c; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+
+    <header class="fd-header text-white p-4 shadow-lg sticky top-0 z-50">
+        <div class="max-w-4xl mx-auto flex items-center justify-between">
+            <h1 class="text-xl md:text-2xl font-bold"><i class="fa-solid fa-fire-extinguisher mr-2"></i> Cloud Overtime Log</h1>
+            <div id="statusIndicator" class="text-xs bg-white text-red-700 px-2 py-1 rounded font-bold hidden">
+                <i class="fa-solid fa-cloud-arrow-up"></i> Saving...
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-4xl mx-auto p-4">
+
+        <section class="bg-white rounded-lg shadow-md p-6 mb-6 border-t-4 border-red-700">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">Add Shift</h2>
+            <form id="otForm" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div class="md:col-span-1">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">Date</label>
+                    <input type="date" id="date" required class="w-full px-3 py-2 border border-gray-300 rounded focus:border-red-500">
+                </div>
+                <div class="md:col-span-1">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">Hours</label>
+                    <input type="number" id="hours" step="0.5" min="0.5" placeholder="12" required class="w-full px-3 py-2 border border-gray-300 rounded focus:border-red-500">
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">Note</label>
+                    <input type="text" id="note" placeholder="Shift Details" class="w-full px-3 py-2 border border-gray-300 rounded focus:border-red-500">
+                </div>
+                <div class="md:col-span-4 flex justify-end mt-2">
+                    <button type="submit" id="submitBtn" class="bg-gray-800 hover:bg-gray-900 text-white font-bold py-2 px-6 rounded transition duration-300">
+                        Add Entry
+                    </button>
+                </div>
+            </form>
+        </section>
+
+        <section class="flex flex-col sm:flex-row gap-4 mb-6 justify-between items-center">
+            <div id="reportDisplay" class="hidden bg-red-100 text-red-800 px-6 py-3 rounded-lg border border-red-200 font-bold text-lg w-full sm:w-auto text-center">
+                Total: <span id="totalHoursDisplay">0</span> Hrs
+            </div>
+            <div class="flex gap-3 w-full sm:w-auto justify-end">
+                <button onclick="generateReport()" class="flex-1 sm:flex-none bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded shadow">
+                    Generate Report
+                </button>
+                <button onclick="downloadCSV()" class="flex-1 sm:flex-none bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded shadow">
+                    Download CSV
+                </button>
+            </div>
+        </section>
+
+        <section class="bg-white rounded-lg shadow-md overflow-hidden min-h-[200px]">
+            <div class="overflow-x-auto">
+                <table class="min-w-full leading-normal">
+                    <thead>
+                        <tr>
+                            <th class="px-5 py-3 border-b-2 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase">Date</th>
+                            <th class="px-5 py-3 border-b-2 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase">Hours</th>
+                            <th class="px-5 py-3 border-b-2 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase">Note</th>
+                        </tr>
+                    </thead>
+                    <tbody id="entryTableBody">
+                        </tbody>
+                </table>
+            </div>
+            <div id="loadingState" class="p-8 flex justify-center items-center">
+                <div class="loader"></div>
+                <span class="ml-3 text-gray-600">Syncing with Cloud...</span>
+            </div>
+            <div id="emptyState" class="p-8 text-center text-gray-500 hidden">No entries found.</div>
+        </section>
+
+    </main>
+
+    <script>
+        // ==========================================
+        // CONFIGURATION: VERIFY YOUR URL BELOW
+        // ==========================================
+        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxqdI0jMTWvYnNYDhZ66xi5WBBphIDzj9znL-VurVT2TlXQZG-WdsW2JqsjfpOZYTSX5A/exec"; 
+                
+        let entries = [];
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('date').valueAsDate = new Date();
+            fetchEntries();
+        });
+
+        // 1. Fetch Data from Google Sheet
+        function fetchEntries() {
+            toggleLoading(true);
+            fetch(WEB_APP_URL)
+                .then(response => response.json())
+                .then(data => {
+                    entries = data;
+                    renderTable();
+                    toggleLoading(false);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    // Only alert if it's a real connection error, not just empty data
+                    if(entries.length === 0) {
+                        document.getElementById('emptyState').innerText = "Could not load data. Check your URL.";
+                        document.getElementById('emptyState').classList.remove('hidden');
+                    }
+                    toggleLoading(false);
+                });
+        }
+
+        // 2. Add New Entry to Google Sheet
+        document.getElementById('otForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const btn = document.getElementById('submitBtn');
+            const status = document.getElementById('statusIndicator');
+            
+            // UI Updates
+            btn.disabled = true;
+            btn.innerText = "Saving...";
+            status.classList.remove('hidden');
+
+            const formData = {
+                date: document.getElementById('date').value,
+                hours: parseFloat(document.getElementById('hours').value),
+                note: document.getElementById('note').value || "-"
+            };
+
+            // Send to Google Script
+            fetch(WEB_APP_URL, {
+                method: "POST",
+                body: JSON.stringify(formData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Success path
+                fetchEntries();
+                resetForm(btn, status);
+            })
+            .catch(error => {
+                // Fallback for opaque responses (common in Google Scripts)
+                console.log("CORS/Opaque response received, refreshing...");
+                setTimeout(fetchEntries, 1500);
+                resetForm(btn, status);
+            });
+        });
+
+        function resetForm(btn, status) {
+            document.getElementById('otForm').reset();
+            document.getElementById('date').valueAsDate = new Date();
+            btn.disabled = false;
+            btn.innerText = "Add Entry";
+            status.classList.add('hidden');
+        }
+
+        // 3. Render Table
+        function renderTable() {
+            const tbody = document.getElementById('entryTableBody');
+            const emptyState = document.getElementById('emptyState');
+            tbody.innerHTML = '';
+
+            if (!entries || entries.length === 0) {
+                emptyState.classList.remove('hidden');
+                return;
+            } else {
+                emptyState.classList.add('hidden');
+            }
+
+            // Sort by Date (Newest First)
+            const sortedEntries = entries.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+            sortedEntries.forEach(entry => {
+                // SAFE DATE HANDLING: Check if date exists and is a string before splitting
+                let dateDisplay = entry.date;
+                if (entry.date && typeof entry.date === 'string' && entry.date.includes('T')) {
+                    dateDisplay = entry.date.split('T')[0];
+                }
+
+                const row = document.createElement('tr');
+                row.className = "hover:bg-gray-50 border-b border-gray-200";
+                row.innerHTML = `
+                    <td class="px-5 py-5 text-sm">${dateDisplay || 'N/A'}</td>
+                    <td class="px-5 py-5 text-sm font-bold text-gray-800">${entry.hours} hrs</td>
+                    <td class="px-5 py-5 text-sm text-gray-600">${entry.note}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function generateReport() {
+            // Ensure we are adding numbers, not strings
+            const total = entries.reduce((sum, entry) => sum + (parseFloat(entry.hours) || 0), 0);
+            document.getElementById('totalHoursDisplay').innerText = total.toFixed(1);
+            document.getElementById('reportDisplay').classList.remove('hidden');
+        }
+
+        function downloadCSV() {
+            if(!entries || entries.length === 0) return alert("No data!");
+            let csv = "Date,Total Hours,Note\n";
+            entries.forEach(e => {
+                let d = e.date ? e.date.toString().replace('T00:00:00.000Z', '') : '';
+                let h = e.hours || 0;
+                let n = e.note ? e.note.replace(/,/g, " ") : '';
+                csv += `${d},${h},${n}\n`;
+            });
+            const link = document.createElement("a");
+            link.href = "data:text/csv;charset=utf-8," + encodeURI(csv);
+            link.download = "fd_cloud_data.csv";
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function toggleLoading(isLoading) {
+            const loader = document.getElementById('loadingState');
+            if(isLoading) loader.classList.remove('hidden');
+            else loader.classList.add('hidden');
+        }
+    </script>
+</body>
+</html>
